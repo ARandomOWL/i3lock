@@ -101,6 +101,7 @@ cairo_surface_t *img = NULL;
 bool tile = false;
 bool ignore_empty_password = false;
 bool skip_repeated_empty_password = false;
+bool show_time = true;
 
 /* isutf, u8_dec © 2005 Jeff Bezanson, public domain */
 #define isutf(c) (((c)&0xC0) != 0x80)
@@ -1327,6 +1328,8 @@ int main(int argc, char *argv[]) {
      * received up until now. ev will only pick up new events (when the X11
      * file descriptor becomes readable). */
     ev_invoke(main_loop, xcb_check, 0);
+    if(show_time)
+        start_time_redraw_tick(main_loop);
     ev_loop(main_loop, 0);
 
     if (stolen_focus == XCB_NONE) {

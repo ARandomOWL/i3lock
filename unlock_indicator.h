@@ -21,6 +21,8 @@ typedef enum {
 
 xcb_pixmap_t draw_image(uint32_t* resolution);
 void redraw_screen(void);
+void start_time_redraw_timeout(void);
+void start_time_redraw_tick(struct ev_loop* main_loop);
 void clear_indicator(void);
 
 #endif

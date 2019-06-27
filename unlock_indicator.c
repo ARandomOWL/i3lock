@@ -62,6 +62,9 @@ extern bool show_failed_attempts;
 /* Number of failed unlock attempts. */
 extern int failed_attempts;
 
+/* Show time away from screen? */
+extern bool show_time;
+
 /*******************************************************************************
  * Variables defined in xcb.c.
  ******************************************************************************/
@@ -80,6 +83,18 @@ static xcb_visualtype_t *vistype;
  * indicator. */
 unlock_state_t unlock_state;
 auth_state_t auth_state;
+
+/* Store the time the screen was locked so we can calulate the time the user has
+ * been away from the screen.
+ */
+time_t start_time;
+
+/* Interval to redraw time. Changes based on diff_time. */
+int time_redraw_tick_interval = 1;
+static struct ev_timer *time_redraw_tick;
+
+/* Store main_loop handle so we can restart timers. */
+struct ev_loop* _main_loop;
 
 /*
  * Draws global image with fill color onto a pixmap with the given
@@ -131,8 +146,14 @@ xcb_pixmap_t draw_image(uint32_t *resolution) {
         cairo_fill(xcb_ctx);
     }
 
-    if (unlock_indicator &&
-        (unlock_state >= STATE_KEY_PRESSED || auth_state > STATE_AUTH_IDLE)) {
+    time_t cur_time = time(NULL);
+    if (!start_time)
+        start_time = cur_time;
+    time_t diff_time = cur_time - start_time;
+
+    /* if (unlock_indicator && */
+    /*     (unlock_state >= STATE_KEY_PRESSED || auth_state > STATE_AUTH_IDLE)) { */
+    if (true) {
         cairo_scale(ctx, scaling_factor, scaling_factor);
         /* Draw a (centered) circle with transparent background. */
         cairo_set_line_width(ctx, 10.0);
@@ -201,6 +222,7 @@ xcb_pixmap_t draw_image(uint32_t *resolution) {
         char *text = NULL;
         /* We don't want to show more than a 3-digit number. */
         char buf[4];
+        char time_text[13];
 
         cairo_set_source_rgb(ctx, 0, 0, 0);
         cairo_select_font_face(ctx, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
@@ -231,6 +253,28 @@ xcb_pixmap_t draw_image(uint32_t *resolution) {
                     }
                     cairo_set_source_rgb(ctx, 1, 0, 0);
                     cairo_set_font_size(ctx, 32.0);
+                } else if (show_time) {
+                    cairo_set_source_rgb(ctx, 0.8, 0.8, 0.8);
+                    if (diff_time < 60) {
+                        snprintf(time_text, 13, "Away %d s", (int)diff_time);
+                        if (time_redraw_tick_interval != 1) {
+                            time_redraw_tick_interval = 1;
+                            start_time_redraw_tick(_main_loop);
+                        }
+                    } else if (diff_time < 60*60) {
+                        snprintf(time_text, 13, "Away %d m", (int)(diff_time/60));
+                        if (time_redraw_tick_interval != 60) {
+                            time_redraw_tick_interval = 60;
+                            start_time_redraw_tick(_main_loop);
+                        }
+                    } else {
+                        snprintf(time_text, 13, "Away %d h", (int)(diff_time/(60*60)));
+                        if (time_redraw_tick_interval != 60*60) {
+                            time_redraw_tick_interval = 60*60;
+                            start_time_redraw_tick(_main_loop);
+                        }
+                    }
+                    text = time_text;
                 }
                 break;
         }
@@ -302,6 +346,7 @@ xcb_pixmap_t draw_image(uint32_t *resolution) {
                       (highlight_start + (M_PI / 3.0)) - (M_PI / 128.0) /* start */,
                       highlight_start + (M_PI / 3.0) /* end */);
             cairo_stroke(ctx);
+        } else if (show_time) {
         }
     }
 
@@ -358,4 +403,27 @@ void clear_indicator(void) {
     } else
         unlock_state = STATE_KEY_PRESSED;
     redraw_screen();
+}
+
+/* Timer redraw for timer updates - adapted from github.com/ravinrabbid/i3lock-clock */
+static void time_redraw_cb(struct ev_loop *loop, ev_timer *w, int revents) {
+    redraw_screen();
+}
+
+void start_time_redraw_tick(struct ev_loop* main_loop) {
+    /* Store main_loop handle so we can restart timers. */
+    if (!_main_loop)
+        _main_loop = main_loop;
+
+    if (time_redraw_tick) {
+        ev_timer_set(time_redraw_tick, time_redraw_tick_interval, time_redraw_tick_interval);
+        ev_timer_again(main_loop, time_redraw_tick);
+    } else {
+        /* When there is no memory, we just don’t have a timeout. We cannot
+        * exit() here, since that would effectively unlock the screen. */
+        if (!(time_redraw_tick = calloc(sizeof(struct ev_timer), 1)))
+            return;
+        ev_timer_init(time_redraw_tick, time_redraw_cb, time_redraw_tick_interval, time_redraw_tick_interval);
+        ev_timer_start(main_loop, time_redraw_tick);
+    }
 }
